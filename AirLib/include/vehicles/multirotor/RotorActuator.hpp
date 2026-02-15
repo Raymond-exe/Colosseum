@@ -61,7 +61,12 @@ namespace airlib
         //0 to 1 - will be scaled to 0 to max_speed
         void setControlSignal(real_T control_signal)
         {
-            current_turning_direction_ = (control_signal < 0) ? -forward_turning_direction_ : forward_turning_direction_;
+            if (control_signal < 0) {
+                current_turning_direction_ = (forward_turning_direction_ == RotorTurningDirection::RotorTurningDirectionCW) ? RotorTurningDirection::RotorTurningDirectionCCW : RotorTurningDirection::RotorTurningDirectionCW;
+            } else {
+                current_turning_direction_ = forward_turning_direction_;
+            }
+
             control_signal_filter_.setInput(Utils::clip(std::abs(control_signal), 0.0f, 1.0f));
         }
 
@@ -125,7 +130,7 @@ namespace airlib
             output.control_signal_filtered = control_signal_filter.getOutput();
             //see relationship of rotation speed with thrust: http://physics.stackexchange.com/a/32013/14061
             output.speed = sqrt(output.control_signal_filtered * params.max_speed_square);
-            output.thrust = output.control_signal_filtered * params.max_thrust * static_cast<int>(forward_turning_direction * current_turning_direction); // TODO simulate decreased efficiency when in reverse thrust
+            output.thrust = output.control_signal_filtered * params.max_thrust * static_cast<int>(forward_turning_direction) * static_cast<int>(current_turning_direction); // TODO simulate decreased efficiency when in reverse thrust
             output.torque_scaler = output.control_signal_filtered * params.max_torque * static_cast<int>(current_turning_direction);
             output.turning_direction = current_turning_direction;
         }
