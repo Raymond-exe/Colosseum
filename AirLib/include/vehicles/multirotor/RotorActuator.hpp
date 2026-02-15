@@ -37,17 +37,19 @@ namespace airlib
         {
             //allow default constructor with later call for initialize
         }
-        RotorActuator(const Vector3r& position, const Vector3r& normal, RotorTurningDirection turning_direction,
+        RotorActuator(const Vector3r& position, const Vector3r& normal, RotorTurningDirection forward_turning_direction,
                       const RotorParams& params, const Environment* environment, uint id = -1)
         {
-            initialize(position, normal, turning_direction, params, environment, id);
+            initialize(position, normal, forward_turning_direction, params, environment, id);
         }
-        void initialize(const Vector3r& position, const Vector3r& normal, RotorTurningDirection turning_direction,
+        void initialize(const Vector3r& position, const Vector3r& normal, RotorTurningDirection forward_turning_direction,
                         const RotorParams& params, const Environment* environment, uint id = -1)
         {
             id_ = id;
             params_ = params;
-            turning_direction_ = turning_direction;
+            forward_turning_direction_ = forward_turning_direction;
+            current_turning_direction_ = forward_turning_direction;
+
             environment_ = environment;
             air_density_sea_level_ = EarthUtils::getAirDensity(0.0f);
 
@@ -59,7 +61,8 @@ namespace airlib
         //0 to 1 - will be scaled to 0 to max_speed
         void setControlSignal(real_T control_signal)
         {
-            control_signal_filter_.setInput(Utils::clip(control_signal, 0.0f, 1.0f));
+            current_turning_direction_ = (control_signal < 0) ? -forward_turning_direction_ : forward_turning_direction_;
+            control_signal_filter_.setInput(Utils::clip(std::abs(control_signal), 0.0f, 1.0f));
         }
 
         Output getOutput() const
@@ -77,7 +80,7 @@ namespace airlib
 
             control_signal_filter_.reset();
 
-            setOutput(output_, params_, control_signal_filter_, turning_direction_);
+            setOutput(output_, params_, control_signal_filter_, forward_turning_direction_, forward_turning_direction_);
         }
 
         virtual void update() override
@@ -89,7 +92,7 @@ namespace airlib
             PhysicsBodyVertex::update();
 
             //update our state
-            setOutput(output_, params_, control_signal_filter_, turning_direction_);
+            setOutput(output_, params_, control_signal_filter_, forward_turning_direction_, current_turning_direction_);
 
             //update filter - this should be after so that first output is same as initial
             control_signal_filter_.update();
@@ -97,7 +100,7 @@ namespace airlib
 
         virtual void reportState(StateReporter& reporter) override
         {
-            reporter.writeValue("Dir", static_cast<int>(turning_direction_));
+            reporter.writeValue("Dir", static_cast<int>(current_turning_direction_));
             reporter.writeValue("Ctrl-in", output_.control_signal_input);
             reporter.writeValue("Ctrl-fl", output_.control_signal_filtered);
             reporter.writeValue("speed", output_.speed);
@@ -116,15 +119,15 @@ namespace airlib
         }
 
     private: //methods
-        static void setOutput(Output& output, const RotorParams& params, const FirstOrderFilter<real_T>& control_signal_filter, RotorTurningDirection turning_direction)
+        static void setOutput(Output& output, const RotorParams& params, const FirstOrderFilter<real_T>& control_signal_filter, RotorTurningDirection forward_turning_direction, RotorTurningDirection current_turning_direction)
         {
             output.control_signal_input = control_signal_filter.getInput();
             output.control_signal_filtered = control_signal_filter.getOutput();
             //see relationship of rotation speed with thrust: http://physics.stackexchange.com/a/32013/14061
             output.speed = sqrt(output.control_signal_filtered * params.max_speed_square);
-            output.thrust = output.control_signal_filtered * params.max_thrust;
-            output.torque_scaler = output.control_signal_filtered * params.max_torque * static_cast<int>(turning_direction);
-            output.turning_direction = turning_direction;
+            output.thrust = output.control_signal_filtered * params.max_thrust * static_cast<int>(forward_turning_direction * current_turning_direction); // TODO simulate decreased efficiency when in reverse thrust
+            output.torque_scaler = output.control_signal_filtered * params.max_torque * static_cast<int>(current_turning_direction);
+            output.turning_direction = current_turning_direction;
         }
 
         void updateEnvironmentalFactors()
@@ -135,7 +138,8 @@ namespace airlib
 
     private: //fields
         uint id_; //only used for debug messages
-        RotorTurningDirection turning_direction_;
+        RotorTurningDirection forward_turning_direction_;
+        RotorTurningDirection current_turning_direction_;
         RotorParams params_;
         FirstOrderFilter<real_T> control_signal_filter_;
         const Environment* environment_ = nullptr;
